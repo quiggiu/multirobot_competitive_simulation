@@ -1,5 +1,5 @@
-<<<<<<< HEAD
-# UGVs_competitive_simulation
+
+# multirobot_competitive_simulation
 
  Simulating Competitive Setpoints Navigation for Twin TurtleBots in Environment with obstacles
 
