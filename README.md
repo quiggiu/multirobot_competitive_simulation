@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # UGVs_competitive_simulation
 
  Simulating Competitive Setpoints Navigation for Twin TurtleBots in Environment with obstacles
@@ -47,3 +48,6 @@ colcon build
 source install/setup.bash
 ros2 launch turtlebot3_gazebo custom_world.launch.py
 ```
+=======
+# multirobot_competitive_simulation
+>>>>>>> 8ab7b534bc7a0e5506137f9003228946cd4d194d
