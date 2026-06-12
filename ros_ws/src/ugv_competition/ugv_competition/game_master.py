@@ -16,13 +16,15 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile
+from rclpy.qos import QoSProfile, DurabilityPolicy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, Pose
 from std_msgs.msg import String
 import random
 import math
 import json
 from nav_msgs.msg import OccupancyGrid
+from visualization_msgs.msg import Marker, MarkerArray
+from builtin_interfaces.msg import Duration
  
 # Game parameters
 NUM_GOALS = 10
@@ -33,38 +35,44 @@ ARENA_Y_MIN = -2.0
 ARENA_Y_MAX = 2.0
 PUBLISH_RATE = 1.0  # Hz
 MIN_GOAL_DISTANCE = GOAL_RADIUS * 2  # minimum distance between goals
- 
- 
+
 class GameMaster(Node):
  
     def __init__(self):
         super().__init__('game_master')
  
         qos = QoSProfile(depth=10)
+
+        map_qos = QoSProfile(depth=1)
+        map_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
  
         # Publisher
         self.goals_pub = self.create_publisher(PoseArray, '/game/goals', qos)
         self.score_pub = self.create_publisher(String, '/game/score', qos)
+
+        # Publisher for RViz visual markers
+        self.marker_pub = self.create_publisher(MarkerArray, '/game/goal_markers', qos)
+
  
         # Subscriber robot position
         self.create_subscription(
             PoseWithCovarianceStamped,
-            '/robot1/amcl_pose',
+            '/amcl_pose',
             self.robot1_pose_callback,
             qos)
  
-        self.create_subscription(
-            PoseWithCovarianceStamped,
-            '/robot2/amcl_pose',
-            self.robot2_pose_callback,
-            qos)
+        #self.create_subscription(
+        #    PoseWithCovarianceStamped,
+        #    '/robot2/amcl_pose',
+         #   self.robot2_pose_callback,
+        #    qos)
 
         # Subscriber Nav2 map
         self.create_subscription(
             OccupancyGrid,
             '/map',
             self.map_callback,
-            qos)
+            map_qos)
         
         # Play state
         self.robot1_pose = None
@@ -83,6 +91,7 @@ class GameMaster(Node):
 
     def map_callback(self, msg):
         """Receive Nav2 map and generate goals on first map reception."""
+        self.get_logger().info(f'Map callback called! Map is None: {self.map is None}')
         if self.map is None:
             self.map = msg
             self.get_logger().info('Map received, generating goals...')
@@ -138,8 +147,11 @@ class GameMaster(Node):
             x = random.uniform(ARENA_X_MIN, ARENA_X_MAX)
             y = random.uniform(ARENA_Y_MIN, ARENA_Y_MAX)
             if self.is_valid_goal(x, y):
-                self.goals.append({'id': len(self.goals), 'x': x, 'y': y, 'active': True})
+                self.goals.append({'id': len(self.goals), 'x': x, 'y': y, 'active': True, 'collected_by': None})
             attempts += 1
+        
+        #to see which goal was collected by who
+        self.goals.append({'id': len(self.goals), 'x': x, 'y': y, 'active': True, 'collected_by': None})
  
     def robot1_pose_callback(self, msg):
         self.robot1_pose = msg.pose.pose
@@ -196,16 +208,79 @@ class GameMaster(Node):
         msg = PoseArray()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'map'
+
+        #for visual 
+        marker_array = MarkerArray()
  
         for goal in self.goals:
+            marker = Marker()
+            marker.header.frame_id = 'map'
+            marker.header.stamp = msg.header.stamp
+            marker.ns = 'shared_arena_goals'
+            
+            # Every marker needs a unique ID so RViz doesn't overwrite them
+            marker.id = goal['id']
             if goal['active']:
+                # Provide the math coordinates
                 pose = Pose()
                 pose.position.x = goal['x']
                 pose.position.y = goal['y']
                 pose.position.z = 0.0
                 msg.poses.append(pose)
- 
+
+                # Draw the visual circle
+                marker.type = Marker.CYLINDER
+                marker.action = Marker.ADD
+                marker.pose.position.x = goal['x']
+                marker.pose.position.y = goal['y']
+                marker.pose.position.z = 0.01  # Lift it 1cm so it doesn't glitch through the floor
+                marker.pose.orientation.w = 1.0
+                
+                # flat circle (40cm wide, 2cm tall)
+                marker.scale.x = 0.4
+                marker.scale.y = 0.4
+                marker.scale.z = 0.01 
+                
+                # bright Green
+                marker.color.a = 0.9  
+                marker.color.r = 0.0  # Turn off Red
+                marker.color.g = 1.0  # Turn on full Green
+                marker.color.b = 0.0  # Turn off Blue
+                
+            else:
+                marker.type = Marker.CYLINDER
+                marker.action = Marker.ADD    
+                marker.pose.position.x = goal['x']
+                marker.pose.position.y = goal['y']
+                marker.pose.position.z = 0.01
+                marker.pose.orientation.w = 1.0
+                marker.scale.x = 0.4
+                marker.scale.y = 0.4
+                marker.scale.z = 0.01
+
+                if goal['collected_by'] == 'robot1':
+                    #blue 
+                    marker.color.a = 0.9 
+                    marker.color.r = 0.0  
+                    marker.color.g = 0.0  
+                    marker.color.b = 1.0 
+
+                if goal['collected_by'] == 'robot2':
+                    #rosso
+                    marker.color.a = 0.9
+                    marker.color.r = 1.0  
+                    marker.color.g = 0.0  
+                    marker.color.b = 0.9
+
+            marker.lifetime = Duration(sec=2, nanosec=0)
+
+            # Add the marker to the array
+            marker_array.markers.append(marker)
+
+        # Publish both arrays to the ROS 2 network
         self.goals_pub.publish(msg)
+        self.marker_pub.publish(marker_array)
+ 
  
     def publish_score(self):
         """Publish the current score."""
